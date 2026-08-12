@@ -11,6 +11,7 @@ from mcp.types import ToolAnnotations
 
 from ..core.cache import get_course_code, get_course_id
 from ..core.client import fetch_all_paginated_results, make_canvas_request
+from ..core.course_filter import is_course_visible
 from ..core.dates import format_date, parse_date
 from ..core.untrusted_content import fence_untrusted_inline
 from ..core.validation import validate_params
@@ -284,6 +285,7 @@ def register_student_tools(mcp: FastMCP) -> None:
             return "Your TODO list is empty! 🎉"
 
         output_lines = ["Your TODO List:\n"]
+        hidden_courses: set[str] = set()
 
         for item in todos:
             item_type = item.get("type", "item")
@@ -295,12 +297,50 @@ def register_student_tools(mcp: FastMCP) -> None:
 
             course_display = await get_course_code(course_id) if course_id else "Unknown Course"
 
+            # why: the course filter applies here too, so a filtered-out course
+            #      stops generating todo noise. An item we cannot attribute to a
+            #      course is KEPT — hiding real work is a worse failure than
+            #      showing noise, and an unresolved code means we do not know
+            #      what we would be hiding.
+            if course_id and course_display:
+                course_record = {
+                    "id": course_id,
+                    "course_code": course_display,
+                    "name": course_display,
+                }
+                if not is_course_visible(course_record):
+                    # note: counted and named below rather than dropped in
+                    #       silence — these can be compliance deadlines the
+                    #       institution actually enforces.
+                    hidden_courses.add(str(course_display))
+                    continue
+
             output_lines.append(
                 f"• {fence_untrusted_inline(name, 'assignment or item title')}\n"
                 f"  Type: {item_type.title()}\n"
                 f"  Course: {course_display}\n"
                 f"  Due: {due_at}\n"
             )
+
+        # why: named, not just counted, and computed before the emptiness check
+        #      below. A hidden todo may be a mandatory compliance item, so the
+        #      user must be able to see that something was withheld and from
+        #      which course.
+        hidden_note = (
+            f"\n(TODO items from filtered courses were hidden: "
+            f"{', '.join(sorted(hidden_courses))}. "
+            f"Unset CANVAS_COURSE_EXCLUDE to see them.)"
+            if hidden_courses
+            else ""
+        )
+
+        if len(output_lines) == 1:
+            # note: Canvas returned todos but the filter removed every one, so
+            #       the cheerful empty message alone would be a lie.
+            return "Your TODO list is empty! 🎉" + hidden_note
+
+        if hidden_note:
+            output_lines.append(hidden_note)
 
         return "\n".join(output_lines)
 

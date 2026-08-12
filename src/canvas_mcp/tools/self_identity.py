@@ -15,6 +15,7 @@ from fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
 from ..core.client import fetch_all_paginated_results, make_canvas_request
+from ..core.course_filter import filter_courses, format_hidden_note
 from ..core.validation import validate_params
 
 
@@ -92,6 +93,14 @@ def register_self_identity_tools(mcp: FastMCP) -> None:
                 "token."
             )
 
+        courses, hidden = filter_courses(courses)
+
+        if not courses:
+            return (
+                "Every one of your enrollments is filtered out.\n"
+                + format_hidden_note(hidden)
+            )
+
         lines = []
         for course in courses:
             roles = _own_roles(course)
@@ -110,6 +119,9 @@ def register_self_identity_tools(mcp: FastMCP) -> None:
             else "\nScope: active enrollments in available or unpublished courses. "
             "Pass include_concluded=true to also list concluded courses."
         )
+        note = format_hidden_note(hidden)
+        if note:
+            footer = f"{footer}\n{note}"
         return header + "\n".join(lines) + footer
 
     @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))

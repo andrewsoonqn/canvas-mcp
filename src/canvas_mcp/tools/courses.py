@@ -16,6 +16,7 @@ from ..core.cache import (
 )
 from ..core.client import fetch_all_paginated_results, make_canvas_request
 from ..core.config import get_config
+from ..core.course_filter import filter_courses, format_hidden_note
 from ..core.dates import format_date
 from ..core.untrusted_content import fence_untrusted, fence_untrusted_inline
 from ..core.validation import validate_params
@@ -190,7 +191,11 @@ def register_course_tools(mcp: FastMCP) -> None:
         if not courses:
             return "No courses found."
 
-        # Refresh our caches with the course data
+        # Refresh our caches with the course data.
+        # why: deliberately runs over the UNFILTERED list. The course filter is
+        #      decluttering, not access control, so an excluded course must stay
+        #      resolvable by code. Filtering here would silently turn the
+        #      feature into a boundary it was never reviewed as.
         for course in courses:
             course_id = str(course.get("id"))
             course_code = course.get("course_code")
@@ -198,6 +203,17 @@ def register_course_tools(mcp: FastMCP) -> None:
             if course_code and course_id:
                 course_code_to_id_cache[course_code] = course_id
                 id_to_course_code_cache[course_id] = course_code
+
+        courses, hidden = filter_courses(courses)
+
+        if not courses:
+            # note: distinct from the earlier "No courses found." — here Canvas
+            #       returned courses and the filter removed all of them, which
+            #       is a config problem the user needs told about.
+            return (
+                "No courses to show: every enrolled course is filtered out.\n"
+                + format_hidden_note(hidden)
+            )
 
         courses_info = []
         for course in courses:
@@ -216,7 +232,9 @@ def register_course_tools(mcp: FastMCP) -> None:
                 f"Code: {code}\nName: {name}\nID: {course_id}\n{role_line}"
             )
 
-        return "Courses:\n\n" + "\n".join(courses_info)
+        output = "Courses:\n\n" + "\n".join(courses_info)
+        note = format_hidden_note(hidden)
+        return f"{output}\n{note}" if note else output
 
     @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
     @validate_params

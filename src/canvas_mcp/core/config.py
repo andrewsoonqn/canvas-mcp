@@ -35,6 +35,18 @@ def _parse_keys(raw: str) -> frozenset[str]:
     return frozenset(k for k in raw.replace(",", " ").split() if k)
 
 
+def _parse_csv_list(raw: str) -> tuple[str, ...]:
+    """Parse a comma-separated list, preserving spaces inside each entry.
+
+    why: deliberately NOT _parse_keys, which also splits on whitespace. Course
+    filter entries may be globs matched against course *names*, so a pattern
+    like ``*Special Programmes*`` must survive as one entry rather than three.
+    """
+    if not raw:
+        return ()
+    return tuple(entry.strip() for entry in raw.split(",") if entry.strip())
+
+
 def _normalize_canvas_url(raw: str) -> str:
     """Normalize ``CANVAS_API_URL`` to the canonical ``…/api/v1`` form.
 
@@ -275,6 +287,20 @@ class Config:
 
         # Role-based tool filtering
         self.canvas_role = os.getenv("CANVAS_ROLE", "all").lower()
+
+        # --- Course visibility filter ---
+        # why: a student's Canvas carries admin/compliance shells they never
+        #      read, which crowd out real modules in every listing. This is
+        #      DECLUTTERING, not access control: an excluded course stays fully
+        #      reachable by id or code, it just leaves the listings.
+        # note: include acts as an allow-list only when non-empty; exclude is
+        #       applied afterwards and therefore wins on conflict.
+        self.canvas_course_include = _parse_csv_list(
+            os.getenv("CANVAS_COURSE_INCLUDE", "")
+        )
+        self.canvas_course_exclude = _parse_csv_list(
+            os.getenv("CANVAS_COURSE_EXCLUDE", "")
+        )
 
         # --- Student write tools (#170) ---
         # Campus-wide operator ceiling. Empty (the default) means NO student write
